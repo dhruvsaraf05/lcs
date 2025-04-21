@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 
 export default function LCSVisualization() {
   const [string1, setString1] = useState('ABCBDAB');
@@ -11,6 +11,8 @@ export default function LCSVisualization() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [speed, setSpeed] = useState(500);
   const [totalSteps, setTotalSteps] = useState(0);
+  const [steps, setSteps] = useState([]);
+  const [path, setPath] = useState([]);
 
   // Generate random string
   const generateRandomString = (length = 8) => {
@@ -29,22 +31,22 @@ export default function LCSVisualization() {
     setString2(randomStr2);
   };
 
-  // Calculate LCS
-  const calculateLCS = () => {
+  // Calculate LCS - memoized with useCallback to prevent recreation on each render
+  const calculateLCS = useCallback(() => {
     const m = string1.length;
     const n = string2.length;
     const dp = Array(m + 1).fill().map(() => Array(n + 1).fill(0));
-    const steps = [];
+    const stepsArray = [];
     
     // Build the dp table
     for (let i = 1; i <= m; i++) {
       for (let j = 1; j <= n; j++) {
         if (string1[i - 1] === string2[j - 1]) {
           dp[i][j] = dp[i - 1][j - 1] + 1;
-          steps.push({ i, j, value: dp[i][j], type: 'match' });
+          stepsArray.push({ i, j, value: dp[i][j], type: 'match' });
         } else {
           dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
-          steps.push({ i, j, value: dp[i][j], type: 'max' });
+          stepsArray.push({ i, j, value: dp[i][j], type: 'max' });
         }
       }
     }
@@ -52,12 +54,12 @@ export default function LCSVisualization() {
     // Backtrack to find the LCS
     let i = m, j = n;
     let lcs = '';
-    const path = [];
+    const pathArray = [];
     
     while (i > 0 && j > 0) {
       if (string1[i - 1] === string2[j - 1]) {
         lcs = string1[i - 1] + lcs;
-        path.push({ i, j, char: string1[i - 1] });
+        pathArray.push({ i, j, char: string1[i - 1] });
         i--;
         j--;
       } else if (dp[i - 1][j] > dp[i][j - 1]) {
@@ -67,36 +69,34 @@ export default function LCSVisualization() {
       }
     }
     
-    setLcsMatrix(dp);
-    setLcsResult(lcs);
-    setTotalSteps(steps.length);
-    return { matrix: dp, steps, path };
-  };
+    return { matrix: dp, lcs, steps: stepsArray, path: pathArray };
+  }, [string1, string2]);
 
-  // Perform LCS calculation when inputs change
+  // Update LCS data when inputs change
   useEffect(() => {
-    const { steps, path } = calculateLCS();
+    const { matrix, lcs, steps: newSteps, path: newPath } = calculateLCS();
+    
+    setLcsMatrix(matrix);
+    setLcsResult(lcs);
+    setSteps(newSteps);
+    setPath(newPath);
+    setTotalSteps(newSteps.length);
     
     // Reset visualization state
     setCurrentStep(0);
     setHighlightedCells([]);
     setShowPath(false);
-    
-    // Store steps for animation
-    const stepsCopy = [...steps];
-    const pathCopy = [...path];
+    setIsPlaying(false);
     
     // Update UI with initial state
-    if (stepsCopy.length > 0) {
-      setHighlightedCells([stepsCopy[0]]);
+    if (newSteps.length > 0) {
+      setHighlightedCells([newSteps[0]]);
     }
-    
-  }, [string1, string2]);
+  }, [string1, string2, calculateLCS]);
 
   // Handle step-by-step visualization
   const handleNextStep = () => {
     if (currentStep < totalSteps - 1) {
-      const { steps } = calculateLCS();
       setCurrentStep(currentStep + 1);
       setHighlightedCells([steps[currentStep + 1]]);
     } else if (currentStep === totalSteps - 1 && !showPath) {
@@ -106,7 +106,6 @@ export default function LCSVisualization() {
 
   const handlePrevStep = () => {
     if (currentStep > 0) {
-      const { steps } = calculateLCS();
       setCurrentStep(currentStep - 1);
       setHighlightedCells([steps[currentStep - 1]]);
     } else if (showPath) {
@@ -120,7 +119,8 @@ export default function LCSVisualization() {
     if (isPlaying) {
       timer = setInterval(() => {
         if (currentStep < totalSteps - 1) {
-          handleNextStep();
+          setCurrentStep(prev => prev + 1);
+          setHighlightedCells([steps[currentStep + 1]]);
         } else if (currentStep === totalSteps - 1 && !showPath) {
           setShowPath(true);
         } else {
@@ -129,7 +129,7 @@ export default function LCSVisualization() {
       }, speed);
     }
     return () => clearInterval(timer);
-  }, [isPlaying, currentStep, totalSteps, showPath, speed]);
+  }, [isPlaying, currentStep, totalSteps, showPath, speed, steps]);
 
   // Toggle play/pause
   const togglePlay = () => {
@@ -138,6 +138,9 @@ export default function LCSVisualization() {
       setCurrentStep(0);
       setShowPath(false);
       setIsPlaying(true);
+      if (steps.length > 0) {
+        setHighlightedCells([steps[0]]);
+      }
     } else {
       setIsPlaying(!isPlaying);
     }
@@ -148,16 +151,15 @@ export default function LCSVisualization() {
     setCurrentStep(0);
     setShowPath(false);
     setIsPlaying(false);
-    setHighlightedCells([]);
-    const { steps } = calculateLCS();
     if (steps.length > 0) {
       setHighlightedCells([steps[0]]);
+    } else {
+      setHighlightedCells([]);
     }
   };
 
   const getCellColor = (i, j) => {
     if (showPath) {
-      const { path } = calculateLCS();
       if (path.some(cell => cell.i === i && cell.j === j)) {
         return 'bg-green-400';
       }
@@ -261,7 +263,7 @@ export default function LCSVisualization() {
         <div className="w-full bg-gray-200 rounded-full h-2.5 mt-1">
           <div 
             className="bg-blue-600 h-2.5 rounded-full" 
-            style={{ width: `${(currentStep / totalSteps) * 100}%` }}
+            style={{ width: `${totalSteps > 0 ? (currentStep / totalSteps) * 100 : 0}%` }}
           ></div>
         </div>
       </div>
